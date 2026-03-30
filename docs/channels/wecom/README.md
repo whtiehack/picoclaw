@@ -112,6 +112,41 @@ All fields can be overridden via environment variables with the prefix `PICOCLAW
 
 ---
 
+## HTTP Send API
+
+The gateway exposes a `POST /send` endpoint on its HTTP server (default `host:port` from `gateway` config). This allows external scripts or services to push messages to any enabled channel, including WeCom.
+
+### Request
+
+```bash
+curl -X POST http://127.0.0.1:<gateway_port>/send \
+  -H 'Content-Type: application/json' \
+  -d '{"channel": "wecom", "chat_id": "<chat_id>", "content": "Hello from API"}'
+```
+
+### Parameters
+
+| Field | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| `channel` | string | Yes | Channel name, e.g. `wecom`, `telegram`. |
+| `chat_id` | string | Yes | Target chat ID. For WeCom: user ID (direct chat) or group ID (group chat). |
+| `content` | string | Yes | Message content (Markdown supported for WeCom). |
+
+### Chat ID
+
+| Chat type | `chat_id` value | How to find it |
+| --------- | --------------- | -------------- |
+| Direct chat | User's enterprise ID (e.g. `zhangsan`) | Check gateway logs for `chat_id` field when a user sends a message. |
+| Group chat | Group ID (e.g. `wrxxxxxxxx`) | Check gateway logs for `chat_id` field when a message is sent in the group. |
+
+### Response
+
+Success: `200 {"ok":true}`
+
+Error: `4xx/5xx {"error":"..."}`
+
+---
+
 ## Migration from Legacy WeCom Config
 
 | Previous config | Migration |

@@ -8,6 +8,7 @@ package channels
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -460,6 +461,9 @@ func (m *Manager) SetupHTTPServer(addr string, healthServer *health.Server) {
 	if healthServer != nil {
 		healthServer.RegisterOnMux(m.mux)
 	}
+
+	// Register the /send endpoint for external message pushing
+	m.mux.HandleFunc("/send", m.handleSendMessage)
 
 	// Discover and register webhook handlers and health checkers
 	m.registerHTTPHandlersLocked()
@@ -1264,4 +1268,49 @@ func (m *Manager) SendToChannel(ctx context.Context, channelName, chatID, conten
 	channel, _ := m.channels[channelName]
 	_, err := channel.Send(ctx, msg)
 	return err
+}
+
+// handleSendMessage handles POST /send requests for pushing messages to channels.
+//
+//	Request body: {"channel": "wecom", "chat_id": "...", "content": "..."}
+//	Response: 200 on success, 4xx/5xx with {"error": "..."} on failure.
+func (m *Manager) handleSendMessage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Channel string `json:"channel"`
+		ChatID  string `json:"chat_id"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Channel == "" || req.ChatID == "" || req.Content == "" {
+		http.Error(w, `{"error":"channel, chat_id and content are required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := m.SendToChannel(r.Context(), req.Channel, req.ChatID, req.Content); err != nil {
+		logger.ErrorCF("channels", "HTTP /send failed", map[string]any{
+			"channel": req.Channel,
+			"chat_id": req.ChatID,
+			"error":   err.Error(),
+		})
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	logger.InfoCF("channels", "HTTP /send delivered", map[string]any{
+		"channel": req.Channel,
+		"chat_id": req.ChatID,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"ok":true}`))
 }
